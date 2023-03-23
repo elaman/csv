@@ -1,12 +1,18 @@
 import Papa from "papaparse";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import './App.css';
 import MyBarChart from "./MyBarChart";
 
 function App() {
   const inputRef = useRef(null);
 
+  const [data, setData] = useState([]);
+  const [mode, setMode] = useState("weekly");
   const [files, setFiles] = useState([]);
+
+  const onModeChange = (e) => {
+    setMode(e.target.value);
+  };
 
   const onParse = () => {
     if (inputRef.current.files.length === 0) {
@@ -20,50 +26,97 @@ function App() {
     Papa.parse(inputRef.current.files[0], {
       header: true,
       skipEmptyLines: true,
-      complete: function (results) {
-        const sortedData = results.data.sort((a, b) => new Date(a.Date) - new Date(b.Date));
-        const startDate = new Date(sortedData[0].Date);
-        const endDate = new Date();
-
-        const weeklyData = {};
-
-        while (startDate <= endDate) {
-          const year = startDate.getFullYear();
-          const week = Math.ceil(((startDate - new Date(year, 0, 1)) / 86400000 + 1) / 7);
-
-          if (!weeklyData[year]) {
-            weeklyData[year] = {};
-          }
-
-          if (!weeklyData[year][week]) {
-            weeklyData[year][week] = { week: `W${week}-Y${year}`, amount: 0 };
-          }
-
-          startDate.setDate(startDate.getDate() + 7);
-        }
-
-        console.log(weeklyData);
-
-        sortedData.forEach((item) => {
-          const d = new Date(item.Date);
-          const year = d.getFullYear();
-          const week = Math.ceil(((d - new Date(year, 0, 1)) / 86400000 + 1) / 7);
-
-          if (weeklyData[year] && weeklyData[year][week]) {
-            weeklyData[year][week].amount += +item.Amount;
-          }
-        });
-
-        const data = Object.values(weeklyData).flatMap((yearData) => Object.values(yearData));
-
-        setFiles((files) => [...files, { name: inputRef.current.files[0].name, data }]);
+      complete: function ({ data }) {
+        const sortedData = data.sort((a, b) => new Date(a.Date) - new Date(b.Date));
+        setFiles((files) => [...files, { name: inputRef.current.files[0].name, data: sortedData }]);
       },
     });
   };
 
-  const output = files.map((file) => (
-    <MyBarChart key={file.name} data={file.data} />
-  ));
+  useEffect(() => {
+    let startDate = new Date();
+    const endDate = new Date();
+    files.forEach(({ data }) => {
+      if (new Date(data[0].Date) < startDate) {
+        startDate = new Date(data[0].Date);
+      }
+    });
+
+    const dataByYears = [];
+    while (startDate <= endDate) {
+      const year = startDate.getFullYear();
+
+      if (mode === "weekly") {
+        if (!dataByYears[year]) {
+          dataByYears[year] = {};
+        }
+
+        const week = Math.ceil(((startDate - new Date(year, 0, 1)) / 86400000 + 1) / 7);
+        if (!dataByYears[year][week]) {
+          dataByYears[year][week] = { label: `W${week}-Y${year}`, amount: 0 };
+        }
+
+        startDate.setDate(startDate.getDate() + 7);
+      }
+      else if (mode === "monthly") {
+        if (!dataByYears[year]) {
+          dataByYears[year] = {};
+        }
+
+        const month = startDate.getMonth();
+        if (!dataByYears[year][month]) {
+          dataByYears[year][month] = { label: `M${month}-Y${year}`, amount: 0 };
+        }
+
+        startDate.setMonth(startDate.getMonth() + 1);
+      }
+      else if (mode === "yearly") {
+        if (!dataByYears[year]) {
+          dataByYears[year] = { label: `Y${year}`, amount: 0 };
+        }
+
+        startDate.setFullYear(startDate.getFullYear() + 1);
+      }
+    }
+
+    files.forEach(({ data }) => {
+      data.forEach((item) => {
+        const d = new Date(item.Date);
+        const year = d.getFullYear();
+
+        if (mode === "weekly") {
+          const week = Math.ceil(((d - new Date(year, 0, 1)) / 86400000 + 1) / 7);
+
+          if (dataByYears[year] && dataByYears[year][week]) {
+            dataByYears[year][week].amount += +item.Amount;
+          }
+        }
+        else if (mode === "monthly") {
+          const month = d.getMonth();
+
+          if (dataByYears[year] && dataByYears[year][month]) {
+            dataByYears[year][month].amount += +item.Amount;
+          }
+        }
+        else if (mode === "yearly") {
+          if (dataByYears[year]) {
+            dataByYears[year].amount += +item.Amount;
+          }
+        }
+      });
+    });
+
+    let chartData = [];
+    if (mode === "weekly" || mode === "monthly") {
+      chartData = Object.values(dataByYears).flatMap((yearData) => Object.values(yearData));
+    }
+    else if (mode === "yearly") {
+      chartData = Object.values(dataByYears);
+    }
+    setData(chartData);
+  }, [files, mode]);
+
+  const output = <MyBarChart data={data} />
 
   return (
     <div className="App">
@@ -76,6 +129,11 @@ function App() {
       />
       <button onClick={onParse}>Parse</button>
 
+      <select onChange={onModeChange} value={mode}>
+        <option value="weekly">Weekly</option>
+        <option value="monthly">Monthly</option>
+        <option value="yearly">Yearly</option>
+      </select>
       {output}
     </div>
   );
